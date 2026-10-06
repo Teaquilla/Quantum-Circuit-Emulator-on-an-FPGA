@@ -10,12 +10,15 @@ jobs:
   vhdl-syntax-check:
     name: VHDL Syntax & Linting
     runs-on: ubuntu-latest
-    container:
-      image: ghdl/ghdl:ubuntu22-llvm
 
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
+
+      - name: Install GHDL
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ghdl
 
       - name: Check VHDL Syntax
         run: |
