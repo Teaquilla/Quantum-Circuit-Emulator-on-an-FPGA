@@ -1,0 +1,24 @@
+# Vivado
+vivado/
+.Xil/
+*.jou
+*.log
+*.str
+*.backup.*
+webtalk*
+*.runs/
+*.cache/
+*.hw/
+*.sim/
+*.ip_user_files/
+
+# simulasi
+*.wdb
+*.vcd
+*.ghw
+build/
+work-obj*.cf
+
+# Python
+__pycache__/
+*.pyc
