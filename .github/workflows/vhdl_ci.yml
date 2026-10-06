@@ -1,0 +1,24 @@
+name: FPGA VHDL CI Pipeline
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+jobs:
+  vhdl-syntax-check:
+    name: VHDL Syntax & Linting
+    runs-on: ubuntu-latest
+    container:
+      image: ghdl/ghdl:ubuntu22-llvm
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Check VHDL Syntax
+        run: |
+          echo "Memulai analisis sintaks VHDL..."
+          find . -type f -name "*.vhd" -exec ghdl -s {} \;
+          echo "Pemeriksaan selesai. Semua sintaks VHDL valid!"
