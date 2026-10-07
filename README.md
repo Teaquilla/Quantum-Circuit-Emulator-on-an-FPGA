@@ -15,8 +15,8 @@ Default **4 qubit**, jumlah qubit bisa diubah lewat generic `N_QUBITS`.
 |---|---|
 | Model referensi Python (float + fixed-point bit-accurate) | ✅ fidelity > 0,999 untuk semua demo |
 | Simulasi behavioral xsim (Vivado 2026.1) | ✅ `tb_gate_engine` (494 vektor), `tb_qcore` (10/10 program), `tb_qemu_top` (4 kasus) |
-| Sintesis 4 qubit | ✅ timing 100 MHz terpenuhi (lihat [Hasil](#hasil-sintesis-dan-implementasi)) |
-| Implementasi + bitstream | 🔄 sampai tahap Generate Bitstream; angka final diisi di bagian Hasil |
+| Sintesis 4 qubit | ✅ timing 100 MHz terpenuhi, RAM terinferensi sebagai BRAM (lihat [Hasil](#hasil-sintesis-dan-implementasi)) |
+| Implementasi + bitstream | ✅ bitstream berhasil dibuat (`write_bitstream` selesai); angka pasca-route belum dicatat |
 | Uji di board (UART → LED) | ⏳ menunggu board dipinjam |
 | CI GitHub Actions | ✅ model Python + simulasi ketiga testbench dengan GHDL, run pertama hijau |
 
@@ -192,8 +192,12 @@ Target: Basys 3, 100 MHz, `N_QUBITS = 4`.
 | Tahap | LUT | FF | BRAM | DSP | WNS (ns) | Catatan |
 |---|---|---|---|---|---|---|
 | Sintesis #1 (RAM terinferensi sebagai flip-flop) | 1.210 | 730 | 0 | 20 | +4,159 | `qstate_ram` = 512 FF; ctrl 740 LUT |
-| Sintesis #2 (RAM pola Xilinx TDP) | _isi_ | _isi_ | _isi_ | _isi_ | _isi_ | |
+| Sintesis #2 (RAM pola Xilinx TDP) | 397 | 218 | 1 tile | 20 | +4,159 | `qstate_ram` jadi BRAM; `u_ctrl` 187 LUT; WHS +0,134 ns |
 | Implementasi (pasca-route) | _isi_ | _isi_ | _isi_ | _isi_ | _isi_ | WNS final |
+
+Perbaikan RAM menurunkan LUT sekitar 67% (1.210 → 397) dan FF sekitar 70% (730 → 218): memori yang sebelumnya 512 flip-flop kini satu Block RAM Tile,
+dan LUT `u_ctrl` turun dari 740 menjadi 187. Rincian sintesis #2 per modul: `u_ctrl` 187 LUT / 23 FF, `u_eng` 117 LUT / 65 FF / 18 DSP.
+Baris sintesis memakai laporan *Synthesized Design* (tanpa delay routing); WNS final ada di laporan *Implemented Design*.
 
 DSP: 18 di `gate_engine` + 2 di `qemu_top` (kuadrat amplitudo untuk scan LED).
 Untuk analisis skalabilitas, ulangi sintesis dengan `N_QUBITS` = 6, 8, 10 dan catat LUT/FF/BRAM/DSP serta WNS. Salinan laporan boleh disimpan di folder `reports/`.
