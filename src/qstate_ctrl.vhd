@@ -72,8 +72,10 @@ architecture rtl of qstate_ctrl is
                 r(j) := kk(j);
             elsif j = t then
                 r(j) := '0';
-            else
+            elsif j > 0 then                    -- selalu benar di sini (t >= 0); guard agar indeks -1 tidak ada
                 r(j) := kk(j - 1);
+            else
+                r(j) := '0';
             end if;
         end loop;
         return r;

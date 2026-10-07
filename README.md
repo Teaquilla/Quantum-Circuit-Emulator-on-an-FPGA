@@ -1,18 +1,29 @@
-# quantum_fpga — Emulator Quantum Circuit (State-Vector) di Basys 3
+# Emulator Quantum Circuit di FPGA
 
-Akselerator hardware untuk mengemulasikan sirkuit kuantum kecil (default **4 qubit**, bisa diubah lewat generic `N_QUBITS`)
-pada FPGA Artix-7 (Basys 3, `xc7a35tcpg236-1`), ditulis dalam **VHDL-2008** untuk **Vivado**.
+Akselerator hardware untuk mengemulasikan **sirkuit kuantum kecil (state-vector)** pada FPGA Artix-7 di board **Basys 3**
+(`xc7a35tcpg236-1`). Ditulis dalam **VHDL** untuk **Vivado**, diverifikasi bit-per-bit terhadap model referensi Python.
+Default **4 qubit**, jumlah qubit bisa diubah lewat generic `N_QUBITS`.
 
-> **Catatan jujur untuk laporan:** ini *emulator/simulator* state-vector, **bukan** komputer kuantum fisik.
-> Kontribusi nyatanya: datapath fixed-point, FSM kontrol, verifikasi bit-accurate terhadap model Python,
-> serta analisis error numerik dan penggunaan resource.
+> **Catatan untuk laporan:** ini *emulator/simulator* state-vector di hardware, **bukan** komputer kuantum fisik.
+> Kontribusi nyatanya: datapath fixed-point, FSM kontrol, verifikasi bit-accurate, serta analisis error numerik dan resource.
+
+## Status
+
+| Tahap | Status |
+|---|---|
+| Model referensi Python (float + fixed-point bit-accurate) | ✅ fidelity > 0,999 untuk semua demo |
+| Simulasi behavioral xsim (Vivado 2026.1) | ✅ `tb_gate_engine` (494 vektor), `tb_qcore` (10/10 program), `tb_qemu_top` (4 kasus) |
+| Sintesis 4 qubit | ✅ timing 100 MHz terpenuhi (lihat [Hasil](#hasil-sintesis-dan-implementasi)) |
+| Implementasi + bitstream | 🔄 sampai tahap Generate Bitstream; angka final diisi di bagian Hasil |
+| Uji di board (UART → LED) | ⏳ menunggu board dipinjam |
+| CI GitHub Actions | 🔄 workflow diperluas (model Python + simulasi 3 testbench dengan GHDL); menunggu run pertama |
 
 ---
 
-## 1. Cara kerja singkat
+## 1. Cara kerja
 
-n qubit direpresentasikan sebagai 2ⁿ amplitudo kompleks. Gerbang 1-qubit pada qubit target `t` adalah perkalian matriks 2×2
-pada setiap pasangan amplitudo `(i0, i1)` yang indeksnya hanya berbeda di bit `t`:
+n qubit = 2ⁿ amplitudo kompleks. Gerbang 1-qubit pada qubit target `t` adalah perkalian matriks 2×2 pada setiap pasangan
+amplitudo `(i0, i1)` yang indeksnya hanya berbeda di bit `t`:
 
 ```
 [a']   [g00 g01] [a]        a = state[i0]   (bit t = 0)
@@ -20,76 +31,58 @@ pada setiap pasangan amplitudo `(i0, i1)` yang indeksnya hanya berbeda di bit `t
 ```
 
 - **Gerbang terkontrol** (CNOT, CZ, CS, CRY, ...) = gerbang biasa + field *control*; pasangan dilewati bila bit control pada `i0` bernilai 0.
-  Jadi tidak ada datapath khusus untuk CNOT.
+  Tidak ada datapath khusus untuk CNOT.
 - Satu unit butterfly dipakai berulang untuk semua pasangan (2ⁿ⁻¹ pasangan per gerbang).
-- Qubit 0 = LSB dari indeks state.
-
-### Diagram blok
+- Qubit 0 = LSB indeks state.
 
 ```
- PC ──UART 115200 8N1──► uart_rx ──► perakit 2 byte ──► ┌────────────────────────── qcore ───────────────────────────┐
- (host/send_program.py)                (qemu_top)       │  qstate_ctrl ──alamat/WE──► qstate_ram (2^N x 32 bit)      │
-                                                        │      │  ▲                        │ dout A/B               │
-                                                        │      ▼  │ valid_out/hasil        ▼                        │
-                                                        │   gate_engine (butterfly 2x2 kompleks, 4 tahap) ◄──────┘  │
-                                                        └──────────────────────────────┬──────────────────────────────┘
+ PC ──UART 115200 8N1──► uart_rx ──► perakit 2 byte ──► ┌─────────────────────────── qcore ───────────────────────────┐
+ (host/send_program.py)                (qemu_top)       │  qstate_ctrl ──alamat/WE──► qstate_ram (2^N x 32 bit)       │
+                                                        │      │  ▲                        │ dout A/B                │
+                                                        │      ▼  │ valid_out/hasil        ▼                         │
+                                                        │   gate_engine (butterfly 2x2 kompleks, 4 tahap) ◄───────┘   │
+                                                        └──────────────────────────────┬───────────────────────────────┘
                                           scan state (re²+im²) ◄───── rd_addr/rd_data ──┘ ──► LED[15:0]
 ```
 
-### Siklus per pasangan
+Siklus per pasangan ≈ 7 clock (`ISSUE` → `CAPTURE` → 4 clock `WAIT_ENG` → `NEXT`):
+4 qubit ≈ 60 clock (~0,6 µs @ 100 MHz) per gerbang, 10 qubit ≈ 3.600 clock (~36 µs).
 
-| State | Aksi |
-|---|---|
-| `S_ISSUE` | alamat `i0`, `i1` ke dua port RAM (atau lewati bila control = 0) |
-| `S_CAPTURE` | data RAM valid, `gate_engine` mengambilnya |
-| `S_WAIT_ENG` | 4 clock pipeline engine; saat `valid_out` hasil ditulis balik |
-| `S_NEXT` | pasangan berikutnya / selesai |
-
-≈ 7 clock per pasangan: 4 qubit ≈ 60 clock (~0,6 µs @ 100 MHz), 10 qubit ≈ 3.600 clock (~36 µs) per gerbang.
-
----
-
-## 2. Struktur folder
+## 2. Struktur repo
 
 ```
-src/     gate_engine.vhd  qstate_ram.vhd  qstate_ctrl.vhd  qcore.vhd  uart_rx.vhd  qemu_top.vhd
-sim/     tb_gate_engine.vhd  tb_qcore.vhd  tb_qemu_top.vhd  + prog_*.mem / golden_*.mem / gate_vectors.mem (dibuat qsim.py)
-ref/     qsim.py            model referensi float + fixed-point bit-accurate + assembler
-host/    send_program.py    kirim program ke board lewat UART
-constr/  basys3.xdc
-scripts/ create_project.tcl  sim_ghdl.sh
+src/      gate_engine.vhd  qstate_ram.vhd  qstate_ctrl.vhd  qcore.vhd  uart_rx.vhd  qemu_top.vhd
+sim/      tb_gate_engine.vhd  tb_qcore.vhd  tb_qemu_top.vhd  + prog_*.mem / golden_*.mem / gate_vectors.mem
+ref/      qsim.py           model referensi float + fixed-point bit-accurate + assembler + generator .mem
+host/     send_program.py   kirim program ke board lewat UART
+constr/   basys3.xdc
+scripts/  create_project.tcl  sim_ghdl.sh
 ```
 
 | File | Peran |
 |---|---|
-| `gate_engine.vhd` | Butterfly 2×2 kompleks, pipeline 4 tahap (operand → 16 perkalian/DSP → jumlah 34 bit → round+saturasi). Tabel koefisien gerbang di dalamnya. |
-| `qstate_ram.vhd` | Memori state vector: 2ᴺ entri × 32 bit `{re[31:16], im[15:0]}`, dual-port, read-first, atribut `ram_style = block`. |
-| `qstate_ctrl.vhd` | FSM: dekode instruksi, iterasi pasangan indeks, gerbang terkontrol, `RESET`, validasi operand (operand salah → NOP). |
+| `gate_engine.vhd` | Butterfly 2×2 kompleks, pipeline 4 tahap (operand → 16 perkalian/DSP → jumlah 34 bit → round + saturasi), tabel koefisien gerbang. |
+| `qstate_ram.vhd` | Memori state vector 2ᴺ × 32 bit `{re, im}`, true dual-port read-first (pola shared variable Xilinx + `ram_style = block`). **Harus bertipe VHDL (bukan 2008) di Vivado.** |
+| `qstate_ctrl.vhd` | FSM: dekode instruksi, iterasi pasangan indeks, gerbang terkontrol, `RESET`; operand tidak valid → NOP. |
 | `qcore.vhd` | Gabungan RAM + engine + ctrl, tanpa pin/UART (dipakai testbench). |
-| `uart_rx.vhd` | Penerima UART 8N1 (generic `CLK_HZ`, `BAUD`), sinkronisasi 2 FF. |
-| `qemu_top.vhd` | Top Basys 3: UART → instruksi 16-bit → `qcore` → scan state → LED. RESET otomatis saat power-up/`btnC`. |
-| `tb_gate_engine.vhd` | Membandingkan engine dengan `gate_vectors.mem` (±380 vektor, semua gerbang, RY/RZ param 0..15, kasus saturasi). |
-| `tb_qcore.vhd` | Menjalankan 10 program dan membandingkan seluruh state vector dengan `golden_*.mem`. |
-| `tb_qemu_top.vhd` | Uji ujung-ke-ujung: byte UART masuk ke `qemu_top`, lalu LED diperiksa (boot, Bell, X, superposisi 4 qubit). Tanpa file `.mem`. |
-| `ref/qsim.py` | Model float (NumPy), model fixed-point yang identik bit-per-bit dengan hardware, assembler, generator `.mem`. |
-| `host/send_program.py` | Mengirim program (`--demo`, `--asm`, atau `--mem`) ke board. |
+| `uart_rx.vhd` | Penerima UART 8N1 (generic `CLK_HZ`, `BAUD`). |
+| `qemu_top.vhd` | Top Basys 3: UART → instruksi 16-bit → `qcore` → scan state → LED. RESET otomatis saat power-up / `btnC`. |
+| `tb_gate_engine.vhd` | Engine vs `gate_vectors.mem` (494 vektor, semua gerbang, RY/RZ param 0..15, saturasi). |
+| `tb_qcore.vhd` | 10 program vs `golden_*.mem`, seluruh state vector dibandingkan bit per bit. |
+| `tb_qemu_top.vhd` | Uji ujung-ke-ujung: byte UART → LED (boot, Bell, X, superposisi 4 qubit). Tanpa file `.mem`. |
+| `ref/qsim.py` | Model float (NumPy), model fixed-point identik dengan hardware, assembler, generator `.mem`. |
+| `host/send_program.py` | Kirim program (`--demo`, `--asm`, `--mem`) ke board. |
 
----
-
-## 3. Format angka
+## 3. Format angka dan instruksi
 
 | Besaran | Format | Catatan |
 |---|---|---|
 | Amplitudo (re, im) | **Q1.15**, int16 | 1,0 ≈ `0x7FFF` |
-| Koefisien gerbang | **Q2.14**, int16 | 1,0 = `0x4000` (Q1.15 tidak bisa menyimpan 1,0, makanya dibedakan) |
+| Koefisien gerbang | **Q2.14**, int16 | 1,0 = `0x4000` (Q1.15 tidak bisa menyimpan 1,0) |
 | Akumulator | 34 bit | 4 suku × (16×16 bit), dijumlah penuh sebelum dipotong |
-| Pembulatan | `(x + 8192) >>> 14` | *round-half-up*, bukan *truncation* (truncation membuat norma state menyusut) |
+| Pembulatan | `(x + 8192) >>> 14` | round-half-up, bukan truncation (truncation membuat norma state menyusut) |
 | Saturasi | ke int16 | |
 | Entri RAM | 32 bit | `{re, im}` |
-
----
-
-## 4. Instruksi dan assembly
 
 Instruksi 16-bit: `[opcode:4][target:4][control:4][param:4]`, `control = F` berarti tanpa kontrol.
 
@@ -97,10 +90,9 @@ Instruksi 16-bit: `[opcode:4][target:4][control:4][param:4]`, `control = F` bera
 |---|---|---|---|---|---|---|---|---|---|---|---|
 | Mnemonic | NOP | H | X | Y | Z | S | T | RY | RZ | MEASURE* | RESET |
 
-\* `MEASURE` dicadangkan (saat ini sama dengan NOP).
-`RY`/`RZ`: θ = `param` × π/8, `param` 0..15 (koefisien dari tabel cos/sin(`param`·π/16)).
+\* `MEASURE` dicadangkan (saat ini sama dengan NOP). `RY`/`RZ`: θ = `param` × π/8, `param` 0..15.
 
-Sintaks assembly (`ref/qsim.py`, komentar dengan `#`):
+Sintaks assembly (komentar dengan `#`):
 
 ```
 RESET             # state kembali ke |0...0>
@@ -112,51 +104,55 @@ RY 0 4            # rotasi, param 0..15
 CRY 0 1 8         # controlled-RY: control target param
 ```
 
----
+## 4. Quick start
 
-## 5. Alur kerja
-
-### a. Siapkan file simulasi dan cek model
 ```bash
-python ref/qsim.py gen      # buat sim/*.mem (program, golden, vektor gate)
+git clone https://github.com/Teaquilla/Emulator-Quantum-Circuit-in-FPGA.git
+cd Emulator-Quantum-Circuit-in-FPGA
+pip install numpy pyserial
+```
+
+**a. Model dan file simulasi** (hasilnya ada di `sim/`, sudah ikut di repo)
+```bash
+python ref/qsim.py gen      # buat sim/*.mem
 python ref/qsim.py check    # float vs fixed-point + cek tabel trig di gate_engine.vhd
 python ref/qsim.py list     # daftar program demo
 ```
 
-### b. Buat proyek Vivado
+**b. Simulasi di Vivado**
 ```bash
 vivado -mode batch -source scripts/create_project.tcl
 ```
-(atau *Tools → Run Tcl Script*). Skrip menetapkan semua file `.vhd` sebagai **VHDL 2008**, top = `qemu_top`, top simulasi = `tb_qcore`.
+Lalu ganti top simulasi dan *Run Behavioral Simulation*; di Tcl Console harus muncul `PASS` / `ALL TESTS PASSED`:
+```tcl
+set_property top tb_gate_engine [get_filesets sim_1]
+set_property top tb_qcore       [get_filesets sim_1]
+set_property top tb_qemu_top    [get_filesets sim_1]
+```
 
-### c. Simulasi (urutan yang disarankan)
-1. `tb_gate_engine` — ganti top simulasi: `set_property top tb_gate_engine [get_filesets sim_1]`.
-2. `tb_qcore` — harus mencetak `ALL TESTS PASSED`. Hasil harus cocok **bit per bit** dengan `qsim.py`.
-3. `tb_qemu_top` — uji jalur UART → core → LED; mencetak `ALL TESTS PASSED`.
-4. Bila xsim tidak menemukan `.mem`, set generic `SIM_DIR` ke path absolut folder `sim/` (lihat komentar di `create_project.tcl`).
-
-Alternatif tanpa Vivado: `scripts/sim_ghdl.sh [tb_qcore|tb_gate_engine|tb_qemu_top]` (butuh GHDL).
-
-### d. Sintesis dan program board
-*Run Synthesis → Implementation → Generate Bitstream → Program Device.* Periksa laporan utilization (BRAM/DSP) dan timing 100 MHz.
-
-### e. Jalankan program dari PC
+**c. Simulasi dengan GHDL (tanpa Vivado)**
 ```bash
-pip install pyserial
+cd scripts && ./sim_ghdl.sh tb_qcore      # atau tb_gate_engine / tb_qemu_top
+```
+Flag `-frelaxed` dipakai karena `qstate_ram` memakai shared variable bertipe biasa.
+
+**d. Bitstream dan board**
+*Run Synthesis → Run Implementation → Generate Bitstream → Open Hardware Manager → Program Device.*
+Bitstream tidak disimpan di repo; unduh `qemu_top.bit` dari halaman **Releases** bila tersedia.
+
+**e. Kirim program**
+```bash
 python host/send_program.py --list                     # demo + port serial
 python host/send_program.py COM5 --demo bell           # Linux: /dev/ttyUSB1
 python host/send_program.py COM5 --asm sirkuitku.asm
-python host/send_program.py --demo grover2 --dry-run   # tanpa board
+python host/send_program.py --demo grover2 --dry-run   # tanpa board, hanya cetak hex
 ```
 
----
+## 5. Membaca hasil di LED
 
-## 6. Membaca hasil di board
-
-Setelah tiap instruksi selesai, `qemu_top` membaca semua amplitudo, menghitung p = re² + im², lalu **LED[i] menyala bila p(state i) ≥ ambang**.
-Ambang diatur **`sw[2:0]` = k**: ambang = 0,25 / 2ᵏ  (k=0: 0,25 · k=1: 0,125 · k=2: 0,0625 · … · k=7: 1/512).
-Hanya 16 state pertama yang ditampilkan. `btnC` = reset (hanya LED0 menyala).
-Indeks LED = nilai biner state dengan qubit 0 sebagai bit terendah.
+Setelah tiap instruksi, `qemu_top` membaca semua amplitudo, menghitung p = re² + im², lalu **LED[i] menyala bila p(state i) ≥ ambang**.
+Ambang diatur **`sw[2:0]` = k**: 0,25 / 2ᵏ (k=0: 0,25 · k=1: 0,125 · k=2: 0,0625 · … · k=7: 1/512).
+Hanya 16 state pertama yang ditampilkan. `btnC` = reset (hanya LED0 menyala). Indeks LED = nilai biner state, qubit 0 sebagai bit terendah.
 
 | Demo | Sirkuit | LED yang menyala (sw = 000) |
 |---|---|---|
@@ -171,34 +167,58 @@ Indeks LED = nilai biner state dengan qubit 0 sebagai bit terendah.
 | `rz_04` | H, RZ(π/2), H | 0 dan 1 (p = 0,5) |
 | `cry` | X 0, CRY(π) 0→1 | 3 (p = 1) |
 
-Untuk osilasi Rabi, kirim `RESET` lalu `RY 0 k` dengan k = 0..15 dan amati probabilitas |1⟩ = sin²(kπ/16).
+Osilasi Rabi: kirim `RESET` lalu `RY 0 k`, k = 0..15; probabilitas |1⟩ = sin²(kπ/16).
 
----
+## 6. CI (GitHub Actions)
 
-## 7. Verifikasi dan analisis untuk laporan
+Workflow **FPGA VHDL CI Pipeline** (`.github/workflows/vhdl_ci.yml`) berjalan pada setiap push dan pull request ke `main`, atau manual lewat *Run workflow*. Ada dua job:
 
-- **Golden model:** `qsim.py` menyediakan model float dan model fixed-point yang identik dengan hardware. Testbench membandingkan keduanya tanpa toleransi.
-- **Error numerik:** untuk program demo, error maksimum model fixed-point vs float sekitar 10⁻⁴ (lihat keluaran `qsim.py gen`).
-  Buat plot *fidelity vs jumlah gerbang* (ulangi H–H–… atau Grover berkali-kali) untuk menunjukkan drift akibat pembulatan.
-- **Resource:** bandingkan LUT/FF/BRAM/DSP dan timing untuk `N_QUBITS` = 4, 6, 8, 10 (ubah generic di `qemu_top`/`create_project.tcl`).
-  Catatan: LED hanya menampilkan 16 state pertama; `.mem` di `sim/` dibuat untuk 4 qubit (`qsim.py gen --n N` untuk N lain).
-- **Kecepatan:** bandingkan waktu eksekusi hardware (≈ 7 clock/pasangan) dengan NumPy/Qiskit untuk sirkuit yang sama.
+| Job | Isi |
+|---|---|
+| **Python Reference Model** | `python ref/qsim.py check` (float vs fixed-point, tabel cos/sin di `gate_engine.vhd`); `qsim.py gen` lalu `git diff` untuk memastikan `sim/*.mem` yang di-commit sinkron dengan model; uji `host/send_program.py --dry-run`. |
+| **VHDL Analyze & Simulate (GHDL)** | Menganalisis semua file VHDL (`--std=08 -frelaxed`) lalu menjalankan `tb_gate_engine`, `tb_qcore`, dan `tb_qemu_top`. Job gagal bila ada `FAIL`/error atau kalimat `PASS` / `ALL TESTS PASSED` tidak muncul. |
 
----
+Catatan: versi awal workflow memakai `find ... -exec ghdl -s {} \;`. Perintah itu hanya memeriksa sintaks per file dan status keluarnya
+diabaikan oleh `find`, sehingga CI bisa hijau walaupun ada error. Versi sekarang tidak punya masalah itu.
+Bila `.mem` tidak sinkron, jalankan `python ref/qsim.py gen` lalu commit hasilnya.
 
-## 8. Status dan batasan
+## Hasil sintesis dan implementasi
 
-- Model Python sudah diuji: fidelity > 0,999 terhadap model float untuk semua demo; tabel trig di VHDL cocok dengan `qsim.py`.
-- **Kode VHDL belum pernah dikompilasi, disimulasikan, atau disintesis saat README ini dibuat.** Jalankan `tb_gate_engine` dan `tb_qcore` lebih dulu dan perbaiki bila ada error sintaks atau mismatch.
-- Periksa di laporan Vivado apakah `qstate_ram` benar-benar menjadi BRAM, jumlah DSP (perkiraan 16), dan WNS timing @ 100 MHz.
+Target: Basys 3, 100 MHz, `N_QUBITS = 4`.
+
+| Tahap | LUT | FF | BRAM | DSP | WNS (ns) | Catatan |
+|---|---|---|---|---|---|---|
+| Sintesis #1 (RAM terinferensi sebagai flip-flop) | 1.210 | 730 | 0 | 20 | +4,159 | `qstate_ram` = 512 FF; ctrl 740 LUT |
+| Sintesis #2 (RAM pola Xilinx TDP) | _isi_ | _isi_ | _isi_ | _isi_ | _isi_ | |
+| Implementasi (pasca-route) | _isi_ | _isi_ | _isi_ | _isi_ | _isi_ | WNS final |
+
+DSP: 18 di `gate_engine` + 2 di `qemu_top` (kuadrat amplitudo untuk scan LED).
+Untuk analisis skalabilitas, ulangi sintesis dengan `N_QUBITS` = 6, 8, 10 dan catat LUT/FF/BRAM/DSP serta WNS. Salinan laporan boleh disimpan di folder `reports/`.
+
+## 7. Checklist uji di board
+
+1. Program `qemu_top.bit` → hanya **LED0** menyala (core menjalankan `RESET` sendiri).
+2. `--demo bell` → LED0 + LED3. Tekan `btnC` untuk reset.
+3. `ghz4` (LED0, LED15) → `grover2` (LED3) → `rabi_08` (LED1) → `cry` (LED3).
+4. Foto/video LED tiap demo untuk laporan. Variasikan `sw[2:0]`.
+
+## 8. Troubleshooting
+
+| Gejala | Penyebab / solusi |
+|---|---|
+| Sintesis: `array index -1 out of range` di `qstate_ctrl.vhd` | Sudah diperbaiki (guard `j > 0` di `insert_zero`). Pastikan memakai versi terbaru. |
+| `u_ram` jadi 512 FF, tidak ada BRAM | Pakai `qstate_ram.vhd` versi shared variable dan set tipe file-nya ke **VHDL** (bukan 2008). |
+| xsim/GHDL: shared variable harus protected | xsim: file bertipe VHDL; GHDL: tambahkan `-frelaxed`. |
+| Testbench: file `.mem` tidak ditemukan | Set generic `SIM_DIR` ke path absolut folder `sim/` (lihat komentar di `create_project.tcl`). |
+| LED tidak berubah saat mengirim program | Cek nomor COM, port tidak dipakai program lain, pin `RsRx` = B18, tekan `btnC` lalu kirim ulang. |
+| `python`: modul `serial` tidak ada | `pip install pyserial`. |
+
+## 9. Batasan dan rencana
+
+- Belum ada: `MEASURE` (sampling LFSR + histogram), UART TX (kirim state ke PC), CORDIC (rotasi sekarang memakai tabel 16 sudut).
+- Hasil hanya lewat LED; presisi 16 bit sehingga error akumulasi tumbuh seiring banyaknya gerbang.
 - Pin di `basys3.xdc` diambil dari master XDC Digilent; cocokkan dengan file resmi.
-- Belum ada: `MEASURE` (sampling dengan LFSR + histogram), UART TX untuk mengirim state ke PC, dan CORDIC (rotasi sekarang memakai tabel 16 sudut).
-- Presisi 16 bit: error akumulasi tumbuh seiring banyaknya gerbang.
+- `tb_qemu_top` memakai baud yang dipercepat (10 clock/bit); pembagi 868 clock/bit pada 115200 baud baru teruji di board.
 
-## 9. Rencana pengembangan
-
-1. Modul `MEASURE`: LFSR 32-bit + distribusi kumulatif → histogram ribuan shot.
-2. `uart_tx`: kirim state vector/histogram ke PC untuk plot dan perbandingan dengan NumPy.
-3. Tabel sudut lebih halus (param > 4 bit) atau CORDIC untuk RY/RZ.
-4. Pipeline penuh antar-pasangan (target ≈ 1 pasangan/clock).
-5. Pulse-level / model Bloch (osilasi Rabi dengan T1/T2) sebagai tambahan bertema *quantum control*.
+Rencana: (1) `MEASURE` dengan LFSR 32-bit + histogram, (2) `uart_tx` untuk plot dan perbandingan dengan NumPy, (3) tabel sudut lebih halus atau CORDIC,
+(4) pipeline penuh antar-pasangan (≈ 1 pasangan/clock), (5) model Bloch/Rabi dengan T1/T2 sebagai tambahan bertema *quantum control*.

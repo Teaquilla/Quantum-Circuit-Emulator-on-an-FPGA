@@ -5,12 +5,50 @@ on:
     branches: [ "main" ]
   pull_request:
     branches: [ "main" ]
+  workflow_dispatch:
 
 jobs:
-  vhdl-syntax-check:
-    name: VHDL Syntax & Linting
+  # ------------------------------------------------------------------
+  # 1) Model referensi Python: konsistensi float vs fixed-point, tabel trig
+  #    di gate_engine.vhd, dan file sim/*.mem yang di-commit harus sama
+  #    dengan hasil `qsim.py gen`.
+  # ------------------------------------------------------------------
+  reference-model:
+    name: Python Reference Model
     runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
 
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install numpy
+
+      - name: Cek model (float vs fixed-point, tabel trig VHDL)
+        run: python ref/qsim.py check
+
+      - name: Generate ulang file .mem dan bandingkan dengan yang di-commit
+        run: |
+          python ref/qsim.py gen
+          git diff --exit-code -- sim/ || {
+            echo "::error::sim/*.mem tidak sinkron dengan ref/qsim.py. Jalankan 'python ref/qsim.py gen' lalu commit."
+            exit 1
+          }
+
+      - name: Uji host script (dry-run, tanpa board)
+        run: python host/send_program.py --demo bell --dry-run
+
+  # ------------------------------------------------------------------
+  # 2) Analisis VHDL-2008 + simulasi ketiga testbench dengan GHDL.
+  #    -frelaxed: qstate_ram memakai shared variable bertipe biasa.
+  # ------------------------------------------------------------------
+  vhdl-simulation:
+    name: VHDL Analyze & Simulate (GHDL)
+    runs-on: ubuntu-latest
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
@@ -20,8 +58,43 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y ghdl
 
-      - name: Check VHDL Syntax
+      - name: Versi GHDL
+        run: ghdl --version
+
+      - name: Analisis semua file VHDL
+        shell: bash
         run: |
-          echo "Memulai analisis sintaks VHDL..."
-          find . -type f -name "*.vhd" -exec ghdl -s {} \;
-          echo "Pemeriksaan selesai. Semua sintaks VHDL valid!"
+          set -euo pipefail
+          mkdir -p build
+          cd sim
+          ghdl -a --std=08 -frelaxed --workdir=../build \
+            ../src/gate_engine.vhd ../src/qstate_ram.vhd ../src/qstate_ctrl.vhd \
+            ../src/qcore.vhd ../src/uart_rx.vhd ../src/qemu_top.vhd \
+            tb_gate_engine.vhd tb_qcore.vhd tb_qemu_top.vhd
+
+      - name: Jalankan testbench
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd sim
+          FLAGS="--std=08 -frelaxed --workdir=../build"
+          fail=0
+          for tb in tb_gate_engine tb_qcore tb_qemu_top; do
+            echo "::group::$tb"
+            ghdl -e $FLAGS "$tb"
+            ghdl -r $FLAGS "$tb" 2>&1 | tee "../build/$tb.log" || fail=1
+            case "$tb" in
+              tb_gate_engine) want="tb_gate_engine: PASS" ;;
+              *)              want="ALL TESTS PASSED" ;;
+            esac
+            if ! grep -q "$want" "../build/$tb.log"; then
+              echo "::error::$tb tidak mencetak '$want'"
+              fail=1
+            fi
+            if grep -Eq "\(report error\)|\(assertion error\)|FAIL" "../build/$tb.log"; then
+              echo "::error::$tb melaporkan error/FAIL"
+              fail=1
+            fi
+            echo "::endgroup::"
+          done
+          exit $fail

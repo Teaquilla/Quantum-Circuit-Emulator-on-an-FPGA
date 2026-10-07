@@ -314,9 +314,9 @@ def gen(outdir, n):
         top = int(np.argmax(np.abs(fx)))
         print(f"{name:14s} {len(prog):5d} {np.max(np.abs(ref - fx)):9.2e} "
               f"{fidelity(ref, fx):9.6f}  |{top:0{n}b}> p={abs(fx[top]) ** 2:.3f}")
-        with open(os.path.join(outdir, f"prog_{name}.mem"), "w") as f:
+        with open(os.path.join(outdir, f"prog_{name}.mem"), "w", newline="\n") as f:
             f.writelines(f"{encode(i):04X}\n" for i in prog)
-        with open(os.path.join(outdir, f"golden_{name}.mem"), "w") as f:
+        with open(os.path.join(outdir, f"golden_{name}.mem"), "w", newline="\n") as f:
             f.writelines(f"{hex16(r)}{hex16(i)}\n" for r, i in zip(re, im))
 
     # vektor uji untuk tb_gate_engine: op par a b exp_a exp_b
@@ -326,7 +326,7 @@ def gen(outdir, n):
     corners = [(0x7FFF, 0, 0, 0), (0, 0, 0x7FFF, 0), (0x8000, 0x8000, 0x8000, 0x8000),
                (0x7FFF, 0x7FFF, 0x7FFF, 0x7FFF), (0, 0, 0, 0)]
     s16 = lambda v: v - 0x10000 if v & 0x8000 else v
-    with open(os.path.join(outdir, "gate_vectors.mem"), "w") as f:
+    with open(os.path.join(outdir, "gate_vectors.mem"), "w", newline="\n") as f:
         for op, par in combos:
             vecs = corners + [tuple(rng.randrange(0x10000) for _ in range(4)) for _ in range(8)]
             for ar, ai, br, bi in vecs:

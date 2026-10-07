@@ -1,4 +1,6 @@
-# Vivado
+# ---------------------------------------------------------------
+# Vivado (proyek dibuat ulang dengan scripts/create_project.tcl)
+# ---------------------------------------------------------------
 vivado/
 .Xil/
 *.jou
@@ -6,19 +8,58 @@ vivado/
 *.str
 *.backup.*
 webtalk*
+hs_err_pid*
 *.runs/
 *.cache/
 *.hw/
 *.sim/
 *.ip_user_files/
+*.gen/
+*.xpr
 
-# simulasi
+# Bitstream & checkpoint: tidak disimpan di repo (ukuran besar, hasil build).
+# Distribusikan lewat GitHub Releases.
+*.bit
+*.bin
+*.ltx
+*.dcp
+*.mmi
+
+# ---------------------------------------------------------------
+# Simulasi (xsim / GHDL)
+# ---------------------------------------------------------------
 *.wdb
+*.wcfg
 *.vcd
 *.ghw
+*.fst
+xsim.dir/
 build/
 work-obj*.cf
 
+# ---------------------------------------------------------------
 # Python
+# ---------------------------------------------------------------
 __pycache__/
 *.pyc
+.venv/
+venv/
+.pytest_cache/
+
+# ---------------------------------------------------------------
+# Editor / OS / arsip
+# ---------------------------------------------------------------
+.vscode/
+.idea/
+*.swp
+*~
+.DS_Store
+Thumbs.db
+desktop.ini
+*.zip
+
+# ---------------------------------------------------------------
+# SENGAJA DISIMPAN di repo (jangan di-ignore):
+#   sim/*.mem        program + golden hasil `python ref/qsim.py gen` (kecil, dipakai testbench & CI)
+#   reports/         ringkasan utilization/timing yang disalin dari Vivado (opsional)
+# ---------------------------------------------------------------

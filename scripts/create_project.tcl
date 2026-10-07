@@ -12,6 +12,8 @@ create_project -force $proj_name [file join $root vivado] -part $part
 set src_files [glob -directory [file join $root src] *.vhd]
 add_files -fileset sources_1 $src_files
 set_property file_type {VHDL 2008} [get_files $src_files]
+# qstate_ram memakai shared variable (pola true-dual-port Xilinx) -> harus VHDL biasa, bukan 2008
+set_property file_type {VHDL} [get_files [file join $root src qstate_ram.vhd]]
 set_property top qemu_top [get_filesets sources_1]
 
 # ---- constraint
