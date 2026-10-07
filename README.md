@@ -1,5 +1,7 @@
 # Emulator Quantum Circuit di FPGA
 
+[![FPGA VHDL CI Pipeline](https://github.com/Teaquilla/Emulator-Quantum-Circuit-in-FPGA/actions/workflows/vhdl_ci.yml/badge.svg)](https://github.com/Teaquilla/Emulator-Quantum-Circuit-in-FPGA/actions/workflows/vhdl_ci.yml)
+
 Akselerator hardware untuk mengemulasikan **sirkuit kuantum kecil (state-vector)** pada FPGA Artix-7 di board **Basys 3**
 (`xc7a35tcpg236-1`). Ditulis dalam **VHDL** untuk **Vivado**, diverifikasi bit-per-bit terhadap model referensi Python.
 Default **4 qubit**, jumlah qubit bisa diubah lewat generic `N_QUBITS`.
@@ -16,7 +18,7 @@ Default **4 qubit**, jumlah qubit bisa diubah lewat generic `N_QUBITS`.
 | Sintesis 4 qubit | ✅ timing 100 MHz terpenuhi (lihat [Hasil](#hasil-sintesis-dan-implementasi)) |
 | Implementasi + bitstream | 🔄 sampai tahap Generate Bitstream; angka final diisi di bagian Hasil |
 | Uji di board (UART → LED) | ⏳ menunggu board dipinjam |
-| CI GitHub Actions | 🔄 workflow diperluas (model Python + simulasi 3 testbench dengan GHDL); menunggu run pertama |
+| CI GitHub Actions | ✅ model Python + simulasi ketiga testbench dengan GHDL, run pertama hijau |
 
 ---
 
@@ -180,6 +182,7 @@ Workflow **FPGA VHDL CI Pipeline** (`.github/workflows/vhdl_ci.yml`) berjalan pa
 
 Catatan: versi awal workflow memakai `find ... -exec ghdl -s {} \;`. Perintah itu hanya memeriksa sintaks per file dan status keluarnya
 diabaikan oleh `find`, sehingga CI bisa hijau walaupun ada error. Versi sekarang tidak punya masalah itu.
+Runner dikunci ke `ubuntu-24.04` (`ubuntu-latest` pindah ke Ubuntu 26 mulai 19 Okt 2026); action memakai `checkout@v6` dan `setup-python@v6` (Node 24).
 Bila `.mem` tidak sinkron, jalankan `python ref/qsim.py gen` lalu commit hasilnya.
 
 ## Hasil sintesis dan implementasi

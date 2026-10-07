@@ -1,5 +1,8 @@
 name: FPGA VHDL CI Pipeline
 
+# runner dikunci ke ubuntu-24.04 agar versi GHDL (apt) stabil; 'ubuntu-latest' pindah ke Ubuntu 26
+# mulai 19 Okt 2026. Ganti ke ubuntu-26.04 secara sengaja setelah mengujinya.
+
 on:
   push:
     branches: [ "main" ]
@@ -15,13 +18,13 @@ jobs:
   # ------------------------------------------------------------------
   reference-model:
     name: Python Reference Model
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - name: Checkout Repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Setup Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: "3.12"
 
@@ -48,10 +51,10 @@ jobs:
   # ------------------------------------------------------------------
   vhdl-simulation:
     name: VHDL Analyze & Simulate (GHDL)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - name: Checkout Repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Install GHDL
         run: |
